@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         Box::pin(async move {
         let mut tool_router = ToolRouter::new();
         let mut prompt_router = PromptRouter::new();
-        let mut managers = Managers::new();
+        let managers = Managers::new();
 
         // Create sequential thinking tool
         let tool = kodegen_tools_sequential_thinking::SequentialThinkingTool::new();
@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
         tool_arc.clone().start_cleanup_task();
 
         // Register shutdown hook to persist active sessions on exit
-        managers.register(SequentialThinkingWrapper(tool_arc));
+        managers.register(SequentialThinkingWrapper(tool_arc)).await;
 
         // Register the tool (1 tool)
         (tool_router, prompt_router) = register_tool(
