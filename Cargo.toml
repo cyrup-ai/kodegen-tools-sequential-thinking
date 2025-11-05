@@ -18,9 +18,9 @@ keywords = [
 license = "Apache-2.0 OR MIT"
 
 [dependencies]
-kodegen_mcp_tool = { path = "../kodegen-mcp-tool" }
-kodegen_mcp_schema = { path = "../kodegen-mcp-schema" }
-kodegen_server_http = { path = "../kodegen-server-http" }
+kodegen_mcp_tool = { version = "0.1" }
+kodegen_mcp_schema = { version = "0.1" }
+kodegen_server_http = { version = "0.1" }
 
 # MCP SDK - for Tool implementation and prompt types
 rmcp = { version = "0.8", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest", "transport-sse-server"]}
