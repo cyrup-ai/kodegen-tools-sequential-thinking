@@ -1,5 +1,10 @@
 //! Sequential thinking tool for MCP
 
-mod sequential_thinking;
+mod types;
+mod session;
+mod persistence;
+pub mod tool;
+mod trait_impl;
 
-pub use sequential_thinking::*;
+pub use tool::SequentialThinkingTool;
+pub use types::{SessionStateSnapshot, ThoughtData};
