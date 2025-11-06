@@ -17,6 +17,14 @@ keywords = [
 ]
 license = "Apache-2.0 OR MIT"
 
+[package.metadata.bundle]
+identifier = "ai.kodegen.kodegen_tools_sequential_thinking"
+publisher = "KODEGEN.ᴀɪ"
+category = "Developer Tool"
+copyright = "Copyright © 2025"
+short_description = "Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
+
+
 [dependencies]
 kodegen_mcp_tool = { version = "0.1" }
 kodegen_mcp_schema = { version = "0.1" }
