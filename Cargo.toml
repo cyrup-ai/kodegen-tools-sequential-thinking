@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_tools_sequential_thinking"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -32,6 +32,8 @@ macos = "public.app-category.developer-tools"
 kodegen_mcp_tool = { version = "0.1" }
 kodegen_mcp_schema = { version = "0.1" }
 kodegen_server_http = { version = "0.1" }
+kodegen_config_manager = { version = "0.1" }
+kodegen_utils = { version = "0.1" }
 
 # MCP SDK - for Tool implementation and prompt types
 rmcp = { version = "0.8", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest", "transport-sse-server"]}
@@ -58,12 +60,6 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # TLS support
 rustls = "0.23"
-
-# Configuration management for server
-kodegen_tools_config = { version = "0.1" }
-
-# Usage tracking for server
-kodegen_utils = { version = "0.1" }
 
 # Synchronization primitives - for Arc<RwLock<ThinkingState>>
 parking_lot = "0.12"

@@ -27,83 +27,58 @@ impl kodegen_server_http::ShutdownHook for SequentialThinkingWrapper {
     }
 }
 
-/// Start the sequential-thinking HTTP server programmatically for embedded mode
+/// Start the sequential-thinking HTTP server programmatically
+///
+/// Returns a ServerHandle for graceful shutdown control.
+/// This function is non-blocking - the server runs in background tasks.
+///
+/// # Arguments
+/// * `addr` - Socket address to bind to (e.g., "127.0.0.1:30440")
+/// * `tls_cert` - Optional path to TLS certificate file
+/// * `tls_key` - Optional path to TLS private key file
+///
+/// # Returns
+/// ServerHandle for graceful shutdown, or error if startup fails
 pub async fn start_server(
     addr: std::net::SocketAddr,
     tls_cert: Option<std::path::PathBuf>,
     tls_key: Option<std::path::PathBuf>,
-) -> Result<()> {
-    use kodegen_server_http::{Managers, RouterSet, register_tool};
-    use kodegen_tools_config::ConfigManager;
+) -> anyhow::Result<kodegen_server_http::ServerHandle> {
+    use kodegen_server_http::{create_http_server, Managers, RouterSet, register_tool};
     use rmcp::handler::server::router::{prompt::PromptRouter, tool::ToolRouter};
+    use std::time::Duration;
 
-    let _ = env_logger::try_init();
-
-    if rustls::crypto::ring::default_provider().install_default().is_err() {
-        log::debug!("rustls crypto provider already installed");
-    }
-
-    let config = ConfigManager::new();
-    config.init().await?;
-
-    let timestamp = chrono::Utc::now();
-    let pid = std::process::id();
-    let instance_id = format!("{}-{}", timestamp.format("%Y%m%d-%H%M%S-%9f"), pid);
-    let usage_tracker = kodegen_utils::usage_tracker::UsageTracker::new(
-        format!("sequential-thinking-{}", instance_id)
-    );
-
-    kodegen_mcp_tool::tool_history::init_global_history(instance_id.clone()).await;
-
-    let mut tool_router = ToolRouter::new();
-    let mut prompt_router = PromptRouter::new();
-    let managers = Managers::new();
-
-    // Create sequential thinking tool
-    let tool = crate::SequentialThinkingTool::new();
-    
-    // Wrap in Arc and start cleanup task (required for session management)
-    let tool_arc = Arc::new(tool.clone());
-    tool_arc.clone().start_cleanup_task();
-
-    // Register shutdown hook to persist active sessions on exit
-    managers.register(SequentialThinkingWrapper(tool_arc)).await;
-
-    // Register the tool (1 tool)
-    (tool_router, prompt_router) = register_tool(
-        tool_router,
-        prompt_router,
-        tool,
-    );
-
-    let router_set = RouterSet::new(tool_router, prompt_router, managers);
-
-    let session_config = rmcp::transport::streamable_http_server::session::local::SessionConfig {
-        channel_capacity: 16,
-        keep_alive: Some(std::time::Duration::from_secs(3600)),
+    let tls_config = match (tls_cert, tls_key) {
+        (Some(cert), Some(key)) => Some((cert, key)),
+        _ => None,
     };
-    let session_manager = Arc::new(
-        rmcp::transport::streamable_http_server::session::local::LocalSessionManager {
-            sessions: Default::default(),
-            session_config,
-        }
-    );
 
-    let server = kodegen_server_http::HttpServer::new(
-        router_set.tool_router,
-        router_set.prompt_router,
-        usage_tracker,
-        config,
-        router_set.managers,
-        session_manager,
-    );
+    let shutdown_timeout = Duration::from_secs(30);
 
-    let shutdown_timeout = std::time::Duration::from_secs(30);
-    let tls_config = tls_cert.zip(tls_key);
-    let handle = server.serve_with_tls(addr, tls_config, shutdown_timeout).await?;
+    create_http_server("sequential-thinking", addr, tls_config, shutdown_timeout, |_config, _tracker| {
+        Box::pin(async move {
+            let mut tool_router = ToolRouter::new();
+            let mut prompt_router = PromptRouter::new();
+            let managers = Managers::new();
 
-    handle.wait_for_completion(shutdown_timeout).await
-        .map_err(|e| anyhow::anyhow!("Server shutdown error: {}", e))?;
+            // Create sequential thinking tool
+            let tool = crate::SequentialThinkingTool::new();
 
-    Ok(())
+            // Wrap in Arc and start cleanup task (required for session management)
+            let tool_arc = Arc::new(tool.clone());
+            tool_arc.clone().start_cleanup_task();
+
+            // Register shutdown hook to persist active sessions on exit
+            managers.register(SequentialThinkingWrapper(tool_arc)).await;
+
+            // Register the tool (1 tool)
+            (tool_router, prompt_router) = register_tool(
+                tool_router,
+                prompt_router,
+                tool,
+            );
+
+            Ok(RouterSet::new(tool_router, prompt_router, managers))
+        })
+    }).await
 }
