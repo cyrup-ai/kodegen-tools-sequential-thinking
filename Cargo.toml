@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_tools_sequential_thinking"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -51,6 +51,19 @@ anyhow = "1"
 
 # Logging - for log::debug! macro
 log = "0.4"
+env_logger = "0.11"
+
+# Date/time - for timestamps
+chrono = { version = "0.4", features = ["serde"] }
+
+# TLS support
+rustls = "0.23"
+
+# Configuration management for server
+kodegen_tools_config = { version = "0.1" }
+
+# Usage tracking for server
+kodegen_utils = { version = "0.1" }
 
 # Synchronization primitives - for Arc<RwLock<ThinkingState>>
 parking_lot = "0.12"
