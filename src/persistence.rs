@@ -142,7 +142,6 @@ async fn persist_session_to_disk(
 /// Returns None if session doesn't exist on disk or restoration fails
 pub async fn try_restore_session(
     session_id: &str,
-    disable_logging: bool,
     persistence_sender: &tokio::sync::mpsc::UnboundedSender<PersistenceCommand>,
 ) -> Option<SessionHandle> {
     let config = PersistenceConfig::default();
@@ -210,7 +209,7 @@ pub async fn try_restore_session(
         thought_history,
         branches,
     };
-    spawn_session_actor_with_state(rx, disable_logging, restored_state);
+    spawn_session_actor_with_state(rx, restored_state);
 
     // Calculate original timestamps from metadata
     let created_at_elapsed = metadata.created_at.elapsed().ok()?;

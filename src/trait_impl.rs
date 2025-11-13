@@ -8,8 +8,8 @@ use crate::types::SessionCommand;
 use kodegen_mcp_schema::reasoning::{SequentialThinkingArgs, SequentialThinkingPromptArgs};
 use kodegen_mcp_tool::error::McpError;
 use kodegen_mcp_tool::Tool;
-use rmcp::model::{PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole};
-use serde_json::{json, Value};
+use rmcp::model::{Content, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole};
+use serde_json::json;
 
 // ============================================================================
 // TOOL IMPLEMENTATION
@@ -49,7 +49,7 @@ impl Tool for SequentialThinkingTool {
         true // Only tracks internal state, doesn't modify external resources
     }
 
-    async fn execute(&self, args: Self::Args) -> Result<Value, McpError> {
+    async fn execute(&self, args: Self::Args) -> Result<Vec<Content>, McpError> {
         // Validate and convert args
         let thought_data = Self::validate_thought(args.clone());
 
@@ -61,7 +61,7 @@ impl Tool for SequentialThinkingTool {
 
         // Send command to session actor
         let cmd = SessionCommand::AddThought {
-            thought: thought_data,
+            thought: thought_data.clone(),
             respond_to,
         };
 
@@ -74,15 +74,53 @@ impl Tool for SequentialThinkingTool {
             .await
             .map_err(|_| McpError::Other(anyhow::anyhow!("Session actor failed to respond")))?;
 
-        // Build JSON response with session ID (snake_case)
-        Ok(json!({
+        // Build formatted output
+        let mut contents = Vec::new();
+
+        // 1. Human-readable narrative
+        let narrative = format!(
+            "\x1b[36m󰧑 **Thought {}/{}** recorded\x1b[0m\n\n\
+             󰗚 Content: {}\n\
+             󰅺 Next thought needed: {}\n\
+             󰙅 Branches: {}\n\
+             󰌣 Total thoughts in history: {}",
+            response.thought_number,
+            response.total_thoughts,
+            {
+                let words: Vec<&str> = thought_data.thought.split_whitespace().collect();
+                if words.len() > 15 {
+                    format!("{}...", words[..15].join(" "))
+                } else {
+                    thought_data.thought.clone()
+                }
+            },
+            if response.next_thought_needed { "Yes" } else { "No (complete)" },
+            if response.branches.is_empty() {
+                "None".to_string()
+            } else {
+                response.branches.join(", ")
+            },
+            response.thought_history_length
+        );
+        contents.push(Content::text(narrative));
+
+        // 2. Metadata as formatted JSON (syntax highlighted)
+        let metadata = json!({
             "session_id": session_id,
             "thought_number": response.thought_number,
             "total_thoughts": response.total_thoughts,
             "next_thought_needed": response.next_thought_needed,
             "branches": response.branches,
             "thought_history_length": response.thought_history_length
-        }))
+        });
+        
+        let json_str = serde_json::to_string_pretty(&metadata)
+            .unwrap_or_else(|_| "{}".to_string());
+        
+        // Plain JSON for AI parsing
+        contents.push(Content::text(json_str));
+
+        Ok(contents)
     }
 
     fn prompt_arguments() -> Vec<PromptArgument> {

@@ -310,15 +310,16 @@ impl LoggingClient {
             .first()
             .and_then(|c| c.as_text())
             .ok_or_else(|| {
-                kodegen_mcp_client::ClientError::ParseError(format!(
+                kodegen_mcp_client::ClientError::Protocol(format!(
                     "No text content in response from tool '{name}'"
                 ))
             })?;
 
         serde_json::from_str(&text_content.text).map_err(|e| {
-            kodegen_mcp_client::ClientError::ParseError(format!(
-                "Failed to parse response from tool '{name}': {e}"
-            ))
+            kodegen_mcp_client::ClientError::ParseError {
+                tool_name: name.to_string(),
+                source: e,
+            }
         })
     }
 

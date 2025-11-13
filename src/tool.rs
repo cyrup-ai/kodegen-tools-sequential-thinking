@@ -29,10 +29,6 @@ pub struct SequentialThinkingTool {
     /// Active session handles (only stores channel senders, not state)
     sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
 
-    /// Whether to disable stderr logging
-    /// Controlled by environment variable `DISABLE_THOUGHT_LOGGING=true`
-    disable_logging: bool,
-
     /// Fire-and-forget channel for persistence requests
     persistence_sender: tokio::sync::mpsc::UnboundedSender<PersistenceCommand>,
 }
@@ -45,21 +41,13 @@ impl Default for SequentialThinkingTool {
 
 impl SequentialThinkingTool {
     /// Create a new `SequentialThinkingTool` instance
-    ///
-    /// Checks the `DISABLE_THOUGHT_LOGGING` environment variable on instantiation.
     #[must_use]
     pub fn new() -> Self {
-        let disable_logging = std::env::var("DISABLE_THOUGHT_LOGGING")
-            .unwrap_or_default()
-            .to_lowercase()
-            == "true";
-
         // Create persistence channel
         let (persistence_sender, persistence_receiver) = tokio::sync::mpsc::unbounded_channel();
 
         let tool = Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
-            disable_logging,
             persistence_sender: persistence_sender.clone(),
         };
 
@@ -100,7 +88,7 @@ impl SequentialThinkingTool {
 
         // Try to restore from disk before creating new session
         if let Some(restored_handle) =
-            try_restore_session(&session_id, self.disable_logging, &self.persistence_sender).await
+            try_restore_session(&session_id, &self.persistence_sender).await
         {
             // Add restored session to active sessions
             let tx = restored_handle.tx.clone();
@@ -113,7 +101,7 @@ impl SequentialThinkingTool {
         let (tx, rx) = tokio::sync::mpsc::channel::<SessionCommand>(100);
 
         // Spawn actor task
-        spawn_session_actor(rx, self.disable_logging);
+        spawn_session_actor(rx);
 
         // Store handle
         let handle = SessionHandle {

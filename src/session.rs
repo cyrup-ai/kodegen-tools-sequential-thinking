@@ -5,10 +5,8 @@
 //! eliminating lock contention and providing perfect isolation between users.
 
 use crate::types::{
-    SessionCommand, SessionResponse, SessionStateSnapshot, ThinkingState, ThoughtData,
+    SessionCommand, SessionResponse, SessionStateSnapshot, ThinkingState,
 };
-use std::io::Write;
-use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
 
 // ============================================================================
 // SESSION ACTOR TASK
@@ -20,7 +18,6 @@ use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, WriteColor};
 /// No locks needed within the task since only this task accesses the state.
 pub fn spawn_session_actor_with_state(
     mut rx: tokio::sync::mpsc::Receiver<SessionCommand>,
-    disable_logging: bool,
     initial_state: ThinkingState,
 ) {
     tokio::spawn(async move {
@@ -56,15 +53,6 @@ pub fn spawn_session_actor_with_state(
                         branches: state.branches.keys().cloned().collect(),
                         thought_history_length: state.thought_history.len(),
                     };
-
-                    // Log to stderr if enabled
-                    if !disable_logging {
-                        let formatted = format_thought(&thought);
-                        let bufwtr = BufferWriter::stderr(ColorChoice::Auto);
-                        let mut buffer = bufwtr.buffer();
-                        let _ = write!(&mut buffer, "{formatted}");
-                        let _ = bufwtr.print(&buffer);
-                    }
 
                     // Send response (ignore if receiver dropped)
                     let _ = respond_to.send(response);
@@ -104,68 +92,9 @@ pub fn spawn_session_actor_with_state(
 /// Spawn new session actor with empty state
 pub fn spawn_session_actor(
     rx: tokio::sync::mpsc::Receiver<SessionCommand>,
-    disable_logging: bool,
 ) {
     // Delegate to _with_state with default state
-    spawn_session_actor_with_state(rx, disable_logging, ThinkingState::default());
+    spawn_session_actor_with_state(rx, ThinkingState::default());
 }
 
-// ============================================================================
-// FORMATTING
-// ============================================================================
 
-/// Format thought for stderr display with ANSI colors
-/// Creates a bordered box with colored prefix based on thought type
-pub fn format_thought(data: &ThoughtData) -> String {
-    let bufwtr = BufferWriter::stderr(ColorChoice::Auto);
-    let mut buffer = bufwtr.buffer();
-
-    // Determine the prefix text and color based on thought type
-    let (prefix_text, prefix_color, context) = if data.is_revision.unwrap_or(false) {
-        let ctx = data
-            .revises_thought
-            .map(|n| format!(" (revising thought {n})"))
-            .unwrap_or_default();
-        ("🔄 Revision", Color::Yellow, ctx)
-    } else if let Some(branch_from) = data.branch_from_thought {
-        let ctx = format!(
-            " (from thought {}, ID: {})",
-            branch_from,
-            data.branch_id.as_deref().unwrap_or("unknown")
-        );
-        ("🌿 Branch", Color::Green, ctx)
-    } else {
-        ("💭 Thought", Color::Blue, String::new())
-    };
-
-    // Create the header with colored prefix
-    let _ = write!(&mut buffer, "\n┌");
-
-    // Calculate border length - we'll build header first to get accurate length
-    let header_plain = format!(
-        "{prefix_text} {}/{}{context}",
-        data.thought_number, data.total_thoughts
-    );
-    let border_len = header_plain.len().max(data.thought.len()) + 4;
-    let border = "─".repeat(border_len);
-
-    let _ = writeln!(&mut buffer, "{border}┐");
-    let _ = write!(&mut buffer, "│ ");
-
-    // Write colored prefix
-    let _ = buffer.set_color(ColorSpec::new().set_fg(Some(prefix_color)));
-    let _ = write!(&mut buffer, "{prefix_text}");
-    let _ = buffer.reset();
-
-    // Write rest of header
-    let _ = writeln!(
-        &mut buffer,
-        " {}/{}{context} │",
-        data.thought_number, data.total_thoughts
-    );
-    let _ = writeln!(&mut buffer, "├{border}┤");
-    let _ = writeln!(&mut buffer, "│ {} │", data.thought);
-    let _ = writeln!(&mut buffer, "└{border}┘");
-
-    String::from_utf8_lossy(buffer.as_slice()).to_string()
-}
