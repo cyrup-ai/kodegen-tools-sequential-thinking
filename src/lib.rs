@@ -54,8 +54,9 @@ pub async fn start_server(
     };
 
     let shutdown_timeout = Duration::from_secs(30);
+    let session_keep_alive = Duration::ZERO;
 
-    create_http_server("sequential-thinking", addr, tls_config, shutdown_timeout, |_config, _tracker| {
+    create_http_server("sequential-thinking", addr, tls_config, shutdown_timeout, session_keep_alive, |_config, _tracker| {
         Box::pin(async move {
             let mut tool_router = ToolRouter::new();
             let mut prompt_router = PromptRouter::new();
