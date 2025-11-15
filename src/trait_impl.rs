@@ -20,7 +20,7 @@ impl Tool for SequentialThinkingTool {
     type PromptArgs = SequentialThinkingPromptArgs;
 
     fn name() -> &'static str {
-        "sequential_thinking"
+        kodegen_mcp_schema::reasoning::SEQUENTIAL_THINKING
     }
 
     fn description() -> &'static str {

@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_tools_sequential_thinking"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -36,7 +36,7 @@ kodegen_config_manager = { version = "0.2" }
 kodegen_utils = { version = "0.2" }
 
 # MCP SDK - for Tool implementation and prompt types
-rmcp = { version = "0.8", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest", "transport-sse-server"]}
+rmcp = { version = "0.8", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest", "transport-sse-server"] }
 
 # Async runtime - for tokio::sync::RwLock
 tokio = { version = "1", features = ["full"] }
