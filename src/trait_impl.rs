@@ -79,7 +79,7 @@ impl Tool for SequentialThinkingTool {
 
         // 1. Human-readable narrative
         let narrative = format!(
-            "\x1b[36m󰧑 **Thought {}/{}** recorded\x1b[0m\n\n\
+            "\x1b[36m󰧑 **Thought {}/{}** recorded\x1b[0m\n\
              󰗚 Content: {}\n\
              󰅺 Next thought needed: {}\n\
              󰙅 Branches: {}\n\
