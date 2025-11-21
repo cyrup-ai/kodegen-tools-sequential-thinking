@@ -7,7 +7,7 @@ use crate::tool::SequentialThinkingTool;
 use crate::types::SessionCommand;
 use kodegen_mcp_schema::reasoning::{SequentialThinkingArgs, SequentialThinkingPromptArgs};
 use kodegen_mcp_tool::error::McpError;
-use kodegen_mcp_tool::Tool;
+use kodegen_mcp_tool::{Tool, ToolExecutionContext};
 use rmcp::model::{Content, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole};
 use serde_json::json;
 
@@ -49,7 +49,7 @@ impl Tool for SequentialThinkingTool {
         true // Only tracks internal state, doesn't modify external resources
     }
 
-    async fn execute(&self, args: Self::Args) -> Result<Vec<Content>, McpError> {
+    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<Vec<Content>, McpError> {
         // Validate and convert args
         let thought_data = Self::validate_thought(args.clone());
 
