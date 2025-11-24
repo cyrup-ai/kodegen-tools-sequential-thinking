@@ -124,7 +124,30 @@ impl Tool for SequentialThinkingTool {
     }
 
     fn prompt_arguments() -> Vec<PromptArgument> {
-        vec![] // No arguments needed for teaching prompt
+        vec![
+            PromptArgument {
+                name: "example_domain".to_string(),
+                title: Some("Example Domain".to_string()),
+                description: Some(
+                    "Customize teaching examples for a specific domain (e.g., 'software engineering', 'mathematics', 'creative writing', 'data analysis'). \
+                     Defaults to software engineering if not specified.".to_string()
+                ),
+                required: Some(false),
+            },
+            PromptArgument {
+                name: "focus_feature".to_string(),
+                title: Some("Feature Focus".to_string()),
+                description: Some(
+                    "Focus the teaching on specific features:\n\
+                     - 'basic': Simple linear thinking examples\n\
+                     - 'revision': How to revise and reconsider thoughts\n\
+                     - 'branching': How to explore alternative paths\n\
+                     - 'advanced': All features including dynamic adjustment\n\
+                     - 'all': Comprehensive overview (default)".to_string()
+                ),
+                required: Some(false),
+            },
+        ]
     }
 
     async fn prompt(&self, _args: Self::PromptArgs) -> Result<Vec<PromptMessage>, McpError> {
