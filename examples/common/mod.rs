@@ -3,7 +3,11 @@
 //! This module spawns the local kodegen-browser HTTP server and connects to it.
 
 use anyhow::{Context, Result};
-use kodegen_mcp_client::{KodegenClient, KodegenConnection, create_streamable_client};
+use kodegen_mcp_client::{
+    KodegenClient, KodegenConnection, X_KODEGEN_CONNECTION_ID, X_KODEGEN_GITROOT, X_KODEGEN_PWD,
+    create_streamable_client,
+};
+use reqwest::header::{HeaderMap, HeaderValue};
 use rmcp::model::{CallToolResult, ServerInfo};
 use serde::de::DeserializeOwned;
 use std::path::{Path, PathBuf};
@@ -66,6 +70,55 @@ pub fn find_workspace_root() -> Result<&'static PathBuf> {
     WORKSPACE_ROOT
         .get()
         .ok_or_else(|| anyhow::anyhow!("Failed to retrieve cached workspace root"))
+}
+
+/// Find git repository root by walking up from start directory
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+    let mut current = start.to_path_buf();
+    loop {
+        if current.join(".git").exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+/// Build session context headers for MCP client
+///
+/// Constructs HeaderMap with:
+/// - `x-kodegen-pwd`: Current working directory
+/// - `x-kodegen-gitroot`: Git repository root (if in a git repo)
+pub fn build_session_headers() -> Result<HeaderMap> {
+    use uuid::Uuid;
+    let mut headers = HeaderMap::new();
+
+    // Connection ID - unique per example run
+    let connection_id = Uuid::new_v4().to_string();
+    headers.insert(
+        X_KODEGEN_CONNECTION_ID,
+        HeaderValue::from_str(&connection_id)
+            .context("Failed to convert connection ID to header value")?,
+    );
+
+    let cwd = std::env::current_dir().context("Failed to get current directory")?;
+
+    headers.insert(
+        X_KODEGEN_PWD,
+        HeaderValue::from_str(&cwd.to_string_lossy())
+            .context("Failed to convert PWD to header value")?,
+    );
+
+    if let Some(git_root) = find_git_root(&cwd) {
+        headers.insert(
+            X_KODEGEN_GITROOT,
+            HeaderValue::from_str(&git_root.to_string_lossy())
+                .context("Failed to convert git root to header value")?,
+        );
+    }
+
+    Ok(headers)
 }
 
 /// Server process handle
@@ -167,7 +220,7 @@ pub async fn connect_with_retry(
     loop {
         attempt += 1;
 
-        match create_streamable_client(url).await {
+        match create_streamable_client(url, build_session_headers()?).await {
             Ok(result) => {
                 eprintln!(
                     "✅ Connected to HTTP server in {:?} (attempt {})",

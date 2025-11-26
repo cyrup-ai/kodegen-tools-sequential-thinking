@@ -1,7 +1,7 @@
 mod common;
 
 use anyhow::Context;
-use kodegen_mcp_client::{responses::SequentialThinkingResponse, tools};
+use kodegen_mcp_client::responses::SequentialThinkingResponse;
 use serde_json::json;
 use tracing::{error, info};
 
@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
 
     let t1: SequentialThinkingResponse = client
         .call_tool_typed(
-            tools::SEQUENTIAL_THINKING,
+            "sequential_thinking",
             json!({
                 "thought": "I need to calculate 15 * 24. Let me break this down step by step.",
                 "thought_number": 1,
@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
 
     let t2: SequentialThinkingResponse = client
         .call_tool_typed(
-            tools::SEQUENTIAL_THINKING,
+            "sequential_thinking",
             json!({
                 "session_id": session_id,
                 "thought": "Using distribution: 15 * 24 = 15 * (20 + 4) = (15*20) + (15*4)",
@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     info!("✅ Thought 2: history_length={}", t2.thought_history_length);
 
     let t3: SequentialThinkingResponse = client.call_tool_typed(
-        tools::SEQUENTIAL_THINKING,
+        "sequential_thinking",
         json!({
             "session_id": session_id,
             "thought": "Computing: 15*20 = 300, 15*4 = 60. Therefore 300 + 60 = 360. Answer: 360",
@@ -87,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
     info!("\n2. Testing dynamic adjustment (expanding total_thoughts)");
 
     let d1: SequentialThinkingResponse = client.call_tool_typed(
-        tools::SEQUENTIAL_THINKING,
+        "sequential_thinking",
         json!({
             "thought": "Analyzing algorithm complexity for quicksort. Initially I think this needs 3 steps.",
             "thought_number": 1,
@@ -100,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
     let dynamic_session = d1.session_id.clone();
 
     let _d2: SequentialThinkingResponse = client.call_tool_typed(
-        tools::SEQUENTIAL_THINKING,
+        "sequential_thinking",
         json!({
             "session_id": dynamic_session,
             "thought": "Wait, I need to cover best case, average case, and worst case separately.",
@@ -114,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
     info!("✅ Dynamic 2: Signaled need for more thoughts");
 
     let d3: SequentialThinkingResponse = client.call_tool_typed(
-        tools::SEQUENTIAL_THINKING,
+        "sequential_thinking",
         json!({
             "session_id": dynamic_session,
             "thought": "Expanding analysis: Best case O(n log n), average O(n log n), worst O(n²)",
@@ -130,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let d4: SequentialThinkingResponse = client.call_tool_typed(
-        tools::SEQUENTIAL_THINKING,
+        "sequential_thinking",
         json!({
             "session_id": dynamic_session,
             "thought": "Worst case occurs with already sorted input when pivot selection is poor.",
@@ -143,7 +143,7 @@ async fn main() -> anyhow::Result<()> {
     info!("✅ Dynamic 4: history_length={}", d4.thought_history_length);
 
     let d5: SequentialThinkingResponse = client.call_tool_typed(
-        tools::SEQUENTIAL_THINKING,
+        "sequential_thinking",
         json!({
             "session_id": dynamic_session,
             "thought": "Mitigation: Use randomized pivot or median-of-three to achieve O(n log n) average.",
@@ -165,7 +165,7 @@ async fn main() -> anyhow::Result<()> {
 
     let r1: SequentialThinkingResponse = client
         .call_tool_typed(
-            tools::SEQUENTIAL_THINKING,
+            "sequential_thinking",
             json!({
                 "thought": "The capital of Australia is Sydney.",
                 "thought_number": 1,
@@ -180,7 +180,7 @@ async fn main() -> anyhow::Result<()> {
     let revision_session = r1.session_id.clone();
 
     let _r2: SequentialThinkingResponse = client.call_tool_typed(
-        tools::SEQUENTIAL_THINKING,
+        "sequential_thinking",
         json!({
             "session_id": revision_session,
             "thought": "Wait, I need to revise that. Sydney is the largest city but NOT the capital.",
@@ -196,7 +196,7 @@ async fn main() -> anyhow::Result<()> {
 
     let r3: SequentialThinkingResponse = client
         .call_tool_typed(
-            tools::SEQUENTIAL_THINKING,
+            "sequential_thinking",
             json!({
                 "session_id": revision_session,
                 "thought": "The correct answer is Canberra, which became the capital in 1913.",
@@ -219,7 +219,7 @@ async fn main() -> anyhow::Result<()> {
     info!("\n4. Testing branching feature");
 
     let b1: SequentialThinkingResponse = client.call_tool_typed(
-        tools::SEQUENTIAL_THINKING,
+        "sequential_thinking",
         json!({
             "thought": "To optimize database queries, I could either add indexes or denormalize.",
             "thought_number": 1,
@@ -233,7 +233,7 @@ async fn main() -> anyhow::Result<()> {
 
     let _b2: SequentialThinkingResponse = client
         .call_tool_typed(
-            tools::SEQUENTIAL_THINKING,
+            "sequential_thinking",
             json!({
                 "session_id": branch_session,
                 "thought": "Let me explore the indexing approach first.",
@@ -250,7 +250,7 @@ async fn main() -> anyhow::Result<()> {
     // Create a branch to explore alternative approach
     let b2_alt: SequentialThinkingResponse = client
         .call_tool_typed(
-            tools::SEQUENTIAL_THINKING,
+            "sequential_thinking",
             json!({
                 "session_id": branch_session,
                 "thought": "Actually, let me also explore denormalization as an alternative.",
@@ -271,7 +271,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Continue main branch
     let _b3: SequentialThinkingResponse = client.call_tool_typed(
-        tools::SEQUENTIAL_THINKING,
+        "sequential_thinking",
         json!({
             "session_id": branch_session,
             "thought": "Indexing pros: maintains normalization, easier rollback. Cons: write overhead.",
@@ -285,7 +285,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Continue alternative branch
     let b3_alt: SequentialThinkingResponse = client.call_tool_typed(
-        tools::SEQUENTIAL_THINKING,
+        "sequential_thinking",
         json!({
             "session_id": branch_session,
             "thought": "Denormalization pros: faster reads, simpler queries. Cons: data redundancy, update complexity.",
