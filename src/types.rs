@@ -3,6 +3,7 @@
 //! This module contains all data structures used throughout the sequential thinking tool,
 //! including thought data, session state, commands, and persistence formats.
 
+use kodegen_config::KodegenConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -99,13 +100,12 @@ pub struct PersistenceConfig {
 
 impl PersistenceConfig {
     pub fn default() -> Self {
-        let base_dir = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("kodegen-mcp")
-            .join("sequential_thinking");
+        let sessions_dir = KodegenConfig::state_dir()
+            .map(|dir| dir.join("sessions").join("sequential_thinking"))
+            .unwrap_or_else(|_| PathBuf::from("sessions/sequential_thinking"));
 
         Self {
-            sessions_dir: base_dir,
+            sessions_dir,
             cleanup_after: Duration::from_secs(24 * 60 * 60),
         }
     }
