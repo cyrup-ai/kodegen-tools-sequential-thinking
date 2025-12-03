@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_tools_sequential_thinking"
-version = "0.5.4"
+version = "0.6.0"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -29,12 +29,12 @@ macos = "public.app-category.developer-tools"
 
 
 [dependencies]
-kodegen_mcp_tool = { version = "0.5" }
-kodegen_mcp_schema = { version = "0.5" }
-kodegen_server_http = { version = "0.5" }
-kodegen_config_manager = { version = "0.5" }
-kodegen_utils = { version = "0.5" }
-kodegen_config = { version = "0.5" }
+kodegen_mcp_tool = { version = "0.6" }
+kodegen_mcp_schema = { version = "0.6" }
+kodegen_server_http = { version = "0.6" }
+kodegen_config_manager = { version = "0.6" }
+kodegen_utils = { version = "0.6" }
+kodegen_config = { version = "0.6" }
 
 # MCP SDK - for Tool implementation and prompt types
 rmcp = { version = "0.10", features = ["client", "schemars", "server", "transport-child-process", "transport-io", "transport-sse-client", "transport-sse-client-reqwest", "transport-streamable-http-client", "transport-streamable-http-client-reqwest", "transport-sse-server"] }
@@ -75,7 +75,7 @@ dirs = "6"
 uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]
-kodegen_mcp_client = { version = "0.5" }
+kodegen_mcp_client = { version = "0.6" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 http = "1"
 tracing = "0.1"
