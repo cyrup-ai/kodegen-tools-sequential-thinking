@@ -5,11 +5,10 @@
 
 use crate::tool::SequentialThinkingTool;
 use crate::types::SessionCommand;
-use kodegen_mcp_schema::reasoning::{SequentialThinkingArgs, SequentialThinkingPromptArgs};
+use kodegen_mcp_schema::reasoning::{SequentialThinkingArgs, SequentialThinkingPromptArgs, SequentialThinkingOutput};
 use kodegen_mcp_tool::error::McpError;
-use kodegen_mcp_tool::{Tool, ToolExecutionContext};
-use rmcp::model::{Content, PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole};
-use serde_json::json;
+use kodegen_mcp_tool::{Tool, ToolExecutionContext, ToolResponse};
+use rmcp::model::{PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole};
 
 // ============================================================================
 // TOOL IMPLEMENTATION
@@ -49,7 +48,7 @@ impl Tool for SequentialThinkingTool {
         true // Only tracks internal state, doesn't modify external resources
     }
 
-    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<Vec<Content>, McpError> {
+    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_tool::ToolArgs>::Output>, McpError> {
         // Validate and convert args
         let thought_data = Self::validate_thought(args.clone());
 
@@ -74,10 +73,7 @@ impl Tool for SequentialThinkingTool {
             .await
             .map_err(|_| McpError::Other(anyhow::anyhow!("Session actor failed to respond")))?;
 
-        // Build formatted output
-        let mut contents = Vec::new();
-
-        // 1. Human-readable narrative
+        // Build human-readable narrative
         let narrative = format!(
             "\x1b[36m󰧑 **Thought {}/{}** recorded\x1b[0m\n\
              󰗚 Content: {}\n\
@@ -102,25 +98,23 @@ impl Tool for SequentialThinkingTool {
             },
             response.thought_history_length
         );
-        contents.push(Content::text(narrative));
 
-        // 2. Metadata as formatted JSON (syntax highlighted)
-        let metadata = json!({
-            "session_id": session_id,
-            "thought_number": response.thought_number,
-            "total_thoughts": response.total_thoughts,
-            "next_thought_needed": response.next_thought_needed,
-            "branches": response.branches,
-            "thought_history_length": response.thought_history_length
-        });
-        
-        let json_str = serde_json::to_string_pretty(&metadata)
-            .unwrap_or_else(|_| "{}".to_string());
-        
-        // Plain JSON for AI parsing
-        contents.push(Content::text(json_str));
+        // Build typed output
+        let output = SequentialThinkingOutput {
+            session_id,
+            thought_number: response.thought_number,
+            total_thoughts: response.total_thoughts,
+            thought: thought_data.thought,
+            next_thought_needed: response.next_thought_needed,
+            is_revision: args.is_revision,
+            revises_thought: args.revises_thought,
+            branch_id: args.branch_id,
+            branch_from_thought: args.branch_from_thought,
+            branches: response.branches,
+            thought_history_length: response.thought_history_length,
+        };
 
-        Ok(contents)
+        Ok(ToolResponse::new(narrative, output))
     }
 
     fn prompt_arguments() -> Vec<PromptArgument> {
