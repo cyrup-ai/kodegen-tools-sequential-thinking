@@ -5,10 +5,9 @@
 
 use crate::tool::SequentialThinkingTool;
 use crate::types::SessionCommand;
-use kodegen_mcp_schema::reasoning::{SequentialThinkingArgs, SequentialThinkingPromptArgs, SequentialThinkingOutput};
-use kodegen_mcp_tool::error::McpError;
-use kodegen_mcp_tool::{Tool, ToolExecutionContext, ToolResponse};
-use rmcp::model::{PromptArgument, PromptMessage, PromptMessageContent, PromptMessageRole};
+use kodegen_mcp_schema::reasoning::{SequentialThinkingArgs, SequentialThinkingOutput, SequentialThinkingPrompts};
+use kodegen_mcp_schema::McpError;
+use kodegen_mcp_schema::{Tool, ToolExecutionContext, ToolResponse};
 
 // ============================================================================
 // TOOL IMPLEMENTATION
@@ -16,7 +15,7 @@ use rmcp::model::{PromptArgument, PromptMessage, PromptMessageContent, PromptMes
 
 impl Tool for SequentialThinkingTool {
     type Args = SequentialThinkingArgs;
-    type PromptArgs = SequentialThinkingPromptArgs;
+    type Prompts = SequentialThinkingPrompts;
 
     fn name() -> &'static str {
         kodegen_mcp_schema::reasoning::SEQUENTIAL_THINKING
@@ -48,7 +47,7 @@ impl Tool for SequentialThinkingTool {
         true // Only tracks internal state, doesn't modify external resources
     }
 
-    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_tool::ToolArgs>::Output>, McpError> {
+    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_schema::ToolArgs>::Output>, McpError> {
         // Validate and convert args
         let thought_data = Self::validate_thought(args.clone());
 
@@ -117,93 +116,6 @@ impl Tool for SequentialThinkingTool {
         Ok(ToolResponse::new(narrative, output))
     }
 
-    fn prompt_arguments() -> Vec<PromptArgument> {
-        vec![
-            PromptArgument {
-                name: "example_domain".to_string(),
-                title: Some("Example Domain".to_string()),
-                description: Some(
-                    "Customize teaching examples for a specific domain (e.g., 'software engineering', 'mathematics', 'creative writing', 'data analysis'). \
-                     Defaults to software engineering if not specified.".to_string()
-                ),
-                required: Some(false),
-            },
-            PromptArgument {
-                name: "focus_feature".to_string(),
-                title: Some("Feature Focus".to_string()),
-                description: Some(
-                    "Focus the teaching on specific features:\n\
-                     - 'basic': Simple linear thinking examples\n\
-                     - 'revision': How to revise and reconsider thoughts\n\
-                     - 'branching': How to explore alternative paths\n\
-                     - 'advanced': All features including dynamic adjustment\n\
-                     - 'all': Comprehensive overview (default)".to_string()
-                ),
-                required: Some(false),
-            },
-        ]
-    }
-
-    async fn prompt(&self, _args: Self::PromptArgs) -> Result<Vec<PromptMessage>, McpError> {
-        Ok(vec![
-            PromptMessage {
-                role: PromptMessageRole::User,
-                content: PromptMessageContent::text(
-                    "How do I use the sequential_thinking tool to solve a complex problem?",
-                ),
-            },
-            PromptMessage {
-                role: PromptMessageRole::Assistant,
-                content: PromptMessageContent::text(
-                    "The sequential_thinking tool helps you break down complex problems step by step:\n\n\
-                     1. Start with initial estimate:\n\
-                     sequential_thinking({\n\
-                       \"thought\": \"First, I need to understand the problem scope\",\n\
-                       \"thought_number\": 1,\n\
-                       \"total_thoughts\": 5,\n\
-                       \"next_thought_needed\": true\n\
-                     })\n\n\
-                     2. Continue building:\n\
-                     sequential_thinking({\n\
-                       \"thought\": \"Now analyzing the core requirements\",\n\
-                       \"thought_number\": 2,\n\
-                       \"total_thoughts\": 5,\n\
-                       \"next_thought_needed\": true\n\
-                     })\n\n\
-                     3. Revise if needed:\n\
-                     sequential_thinking({\n\
-                       \"thought\": \"Wait, I need to reconsider my approach\",\n\
-                       \"thought_number\": 3,\n\
-                       \"total_thoughts\": 6,\n\
-                       \"is_revision\": true,\n\
-                       \"revises_thought\": 2,\n\
-                       \"next_thought_needed\": true\n\
-                     })\n\n\
-                     4. Branch to explore alternatives:\n\
-                     sequential_thinking({\n\
-                       \"thought\": \"Alternative approach using pattern X\",\n\
-                       \"thought_number\": 4,\n\
-                       \"total_thoughts\": 6,\n\
-                       \"branch_from_thought\": 2,\n\
-                       \"branch_id\": \"alt-pattern-x\",\n\
-                       \"next_thought_needed\": true\n\
-                     })\n\n\
-                     5. Conclude:\n\
-                     sequential_thinking({\n\
-                       \"thought\": \"Final solution: implement approach Y\",\n\
-                       \"thought_number\": 6,\n\
-                       \"total_thoughts\": 6,\n\
-                       \"next_thought_needed\": false\n\
-                     })\n\n\
-                     The tool tracks your entire thinking process, allowing you to:\n\
-                     - Adjust total_thoughts dynamically as you learn more\n\
-                     - Revise earlier thoughts when you discover new information\n\
-                     - Branch to explore multiple solution paths\n\
-                     - See your complete thought history across all invocations",
-                ),
-            },
-        ])
-    }
 }
 
 // ============================================================================

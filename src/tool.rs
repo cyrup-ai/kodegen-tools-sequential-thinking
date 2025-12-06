@@ -1,7 +1,7 @@
 //! Main tool implementation
 //!
 //! This module contains the SequentialThinkingTool struct and its implementation
-//! of the Tool trait from kodegen_mcp_tool.
+//! of the Tool trait from kodegen_mcp_schema.
 
 use crate::persistence::{start_disk_cleanup_task, start_persistence_processor, try_restore_session};
 use crate::session::spawn_session_actor;
@@ -9,7 +9,7 @@ use crate::types::{
     PersistenceCommand, SessionCommand, SessionHandle, SessionStateSnapshot, ThoughtData,
 };
 use kodegen_mcp_schema::reasoning::SequentialThinkingArgs;
-use kodegen_mcp_tool::error::McpError;
+use kodegen_mcp_schema::McpError;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
