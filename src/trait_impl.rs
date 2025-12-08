@@ -5,7 +5,7 @@
 
 use crate::tool::SequentialThinkingTool;
 use crate::types::SessionCommand;
-use kodegen_mcp_schema::reasoning::{SequentialThinkingArgs, SequentialThinkingOutput, SequentialThinkingPrompts};
+use kodegen_mcp_schema::sequential_thinking::{SequentialThinkingArgs, SequentialThinkingOutput, SequentialThinkingPrompts};
 use kodegen_mcp_schema::McpError;
 use kodegen_mcp_schema::{Tool, ToolExecutionContext, ToolResponse};
 
@@ -18,7 +18,7 @@ impl Tool for SequentialThinkingTool {
     type Prompts = SequentialThinkingPrompts;
 
     fn name() -> &'static str {
-        kodegen_mcp_schema::reasoning::SEQUENTIAL_THINKING
+        kodegen_mcp_schema::sequential_thinking::SEQUENTIAL_THINKING
     }
 
     fn description() -> &'static str {

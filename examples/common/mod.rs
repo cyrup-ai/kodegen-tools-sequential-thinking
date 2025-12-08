@@ -18,12 +18,12 @@ use tokio::sync::Mutex;
 use std::sync::Arc;
 
 /// Browser HTTP server configuration
-const HTTP_PORT: u16 = 30450;
+const HTTP_PORT: u16 = kodegen_config::PORT_REASONING;
 const BINARY_NAME: &str = "kodegen-sequential-thinking";
 const PACKAGE_NAME: &str = "kodegen_tools_sequential_thinking";
 
 /// HTTP server URL for browser examples
-const HTTP_URL: &str = "http://127.0.0.1:30450/mcp";
+const HTTP_URL: &str = const_format::formatcp!("http://127.0.0.1:{}/mcp", kodegen_config::PORT_REASONING);
 
 /// Cached workspace root
 static WORKSPACE_ROOT: OnceLock<PathBuf> = OnceLock::new();

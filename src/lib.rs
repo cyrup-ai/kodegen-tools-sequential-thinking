@@ -33,7 +33,7 @@ impl kodegen_server_http::ShutdownHook for SequentialThinkingWrapper {
 /// This function is non-blocking - the server runs in background tasks.
 ///
 /// # Arguments
-/// * `addr` - Socket address to bind to (e.g., "127.0.0.1:30440")
+/// * `addr` - Socket address to bind to (e.g., "127.0.0.1:30450")
 /// * `tls_cert` - Optional path to TLS certificate file
 /// * `tls_key` - Optional path to TLS private key file
 ///
@@ -44,44 +44,18 @@ pub async fn start_server(
     tls_cert: Option<std::path::PathBuf>,
     tls_key: Option<std::path::PathBuf>,
 ) -> anyhow::Result<kodegen_server_http::ServerHandle> {
-    use kodegen_server_http::{create_http_server, Managers, RouterSet, register_tool};
-    use rmcp::handler::server::router::{prompt::PromptRouter, tool::ToolRouter};
-    use std::time::Duration;
+    // Bind to the address first
+    let listener = tokio::net::TcpListener::bind(addr).await
+        .map_err(|e| anyhow::anyhow!("Failed to bind to {}: {}", addr, e))?;
 
+    // Convert separate cert/key into Option<(cert, key)> tuple
     let tls_config = match (tls_cert, tls_key) {
         (Some(cert), Some(key)) => Some((cert, key)),
         _ => None,
     };
 
-    let shutdown_timeout = Duration::from_secs(30);
-    let session_keep_alive = Duration::ZERO;
-
-    create_http_server("sequential-thinking", addr, tls_config, shutdown_timeout, session_keep_alive, |_config, _tracker| {
-        Box::pin(async move {
-            let mut tool_router = ToolRouter::new();
-            let mut prompt_router = PromptRouter::new();
-            let managers = Managers::new();
-
-            // Create sequential thinking tool
-            let tool = crate::SequentialThinkingTool::new();
-
-            // Wrap in Arc and start cleanup task (required for session management)
-            let tool_arc = Arc::new(tool.clone());
-            tool_arc.clone().start_cleanup_task();
-
-            // Register shutdown hook to persist active sessions on exit
-            managers.register(SequentialThinkingWrapper(tool_arc)).await;
-
-            // Register the tool (1 tool)
-            (tool_router, prompt_router) = register_tool(
-                tool_router,
-                prompt_router,
-                tool,
-            );
-
-            Ok(RouterSet::new(tool_router, prompt_router, managers))
-        })
-    }).await
+    // Delegate to start_server_with_listener
+    start_server_with_listener(listener, tls_config).await
 }
 
 /// Start sequential-thinking HTTP server using pre-bound listener (TOCTOU-safe)
@@ -99,15 +73,12 @@ pub async fn start_server_with_listener(
     listener: tokio::net::TcpListener,
     tls_config: Option<(std::path::PathBuf, std::path::PathBuf)>,
 ) -> anyhow::Result<kodegen_server_http::ServerHandle> {
-    use kodegen_server_http::{create_http_server_with_listener, Managers, RouterSet, register_tool};
+    use kodegen_server_http::{ServerBuilder, Managers, RouterSet, register_tool};
     use rmcp::handler::server::router::{prompt::PromptRouter, tool::ToolRouter};
-    use std::time::Duration;
 
-    let shutdown_timeout = Duration::from_secs(30);
-    let session_keep_alive = Duration::ZERO;
-
-    create_http_server_with_listener("sequential-thinking", listener, tls_config, shutdown_timeout, session_keep_alive, |_config, _tracker| {
-        Box::pin(async move {
+    let mut builder = ServerBuilder::new()
+        .category(kodegen_config::CATEGORY_SEQUENTIAL_THINKING)
+        .register_tools(|| async {
             let mut tool_router = ToolRouter::new();
             let mut prompt_router = PromptRouter::new();
             let managers = Managers::new();
@@ -131,5 +102,11 @@ pub async fn start_server_with_listener(
 
             Ok(RouterSet::new(tool_router, prompt_router, managers))
         })
-    }).await
+        .with_listener(listener);
+
+    if let Some((cert, key)) = tls_config {
+        builder = builder.with_tls_config(cert, key);
+    }
+
+    builder.serve().await
 }

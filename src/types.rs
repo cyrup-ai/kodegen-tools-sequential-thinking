@@ -101,8 +101,12 @@ pub struct PersistenceConfig {
 impl PersistenceConfig {
     pub fn default() -> Self {
         let sessions_dir = KodegenConfig::state_dir()
-            .map(|dir| dir.join("sessions").join("sequential_thinking"))
-            .unwrap_or_else(|_| PathBuf::from("sessions/sequential_thinking"));
+            .map(|dir| dir.join("sessions").join(kodegen_config::SEQUENTIAL_THINKING))
+            .unwrap_or_else(|_| {
+                let mut path = PathBuf::from("sessions");
+                path.push(kodegen_config::SEQUENTIAL_THINKING);
+                path
+            });
 
         Self {
             sessions_dir,

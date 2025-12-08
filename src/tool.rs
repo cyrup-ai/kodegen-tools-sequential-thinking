@@ -8,7 +8,7 @@ use crate::session::spawn_session_actor;
 use crate::types::{
     PersistenceCommand, SessionCommand, SessionHandle, SessionStateSnapshot, ThoughtData,
 };
-use kodegen_mcp_schema::reasoning::SequentialThinkingArgs;
+use kodegen_mcp_schema::sequential_thinking::SequentialThinkingArgs;
 use kodegen_mcp_schema::McpError;
 use std::collections::HashMap;
 use std::sync::Arc;
