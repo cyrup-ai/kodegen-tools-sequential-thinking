@@ -9,7 +9,7 @@
 
 A blazing-fast, memory-efficient MCP (Model Context Protocol) tool that provides sequential thinking capabilities for AI agents. Part of the KODEGEN.ᴀɪ ecosystem.
 
-## Features 
+## Features
 
 - **Sequential Thinking**: Break down complex problems into manageable thought steps
 - **Dynamic Adjustment**: Expand or reduce total thoughts as understanding evolves
