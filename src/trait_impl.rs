@@ -47,12 +47,15 @@ impl Tool for SequentialThinkingTool {
         true // Only tracks internal state, doesn't modify external resources
     }
 
-    async fn execute(&self, args: Self::Args, _ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_schema::ToolArgs>::Output>, McpError> {
+    async fn execute(&self, args: Self::Args, ctx: ToolExecutionContext) -> Result<ToolResponse<<Self::Args as kodegen_mcp_schema::ToolArgs>::Output>, McpError> {
         // Validate and convert args
         let thought_data = Self::validate_thought(args.clone());
 
-        // Get or create session
-        let (session_id, tx) = self.get_or_create_session(args.session_id).await?;
+        // Get connection_id from context (same pattern as terminal tool)
+        let connection_id = ctx.connection_id().unwrap_or("default");
+
+        // Get or create session using connection_id
+        let (session_id, tx) = self.get_or_create_session(connection_id).await?;
 
         // Create response channel
         let (respond_to, rx) = tokio::sync::oneshot::channel();
@@ -72,31 +75,21 @@ impl Tool for SequentialThinkingTool {
             .await
             .map_err(|_| McpError::Other(anyhow::anyhow!("Session actor failed to respond")))?;
 
-        // Build human-readable narrative
-        let narrative = format!(
-            "\x1b[36m󰧑 **Thought {}/{}** recorded\x1b[0m\n\
-             󰗚 Content: {}\n\
-             󰅺 Next thought needed: {}\n\
-             󰙅 Branches: {}\n\
-             󰌣 Total thoughts in history: {}",
-            response.thought_number,
-            response.total_thoughts,
-            {
-                let words: Vec<&str> = thought_data.thought.split_whitespace().collect();
-                if words.len() > 15 {
-                    format!("{}...", words[..15].join(" "))
-                } else {
-                    thought_data.thought.clone()
-                }
-            },
-            if response.next_thought_needed { "Yes" } else { "No (complete)" },
-            if response.branches.is_empty() {
-                "None".to_string()
+        // Build display: thought only, truncated at 200 chars, light grey
+        let display = {
+            let thought = &thought_data.thought;
+            let truncated = if thought.len() > 200 {
+                // Find last word/symbol boundary before char 200
+                let truncate_at = thought[..200]
+                    .rfind(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
+                    .unwrap_or(200);
+                format!("{}...", &thought[..truncate_at])
             } else {
-                response.branches.join(", ")
-            },
-            response.thought_history_length
-        );
+                thought.clone()
+            };
+            // Light grey ANSI (same as terminal tool)
+            format!("\x1b[90m{}\x1b[0m", truncated)
+        };
 
         // Build typed output
         let output = SequentialThinkingOutput {
@@ -113,7 +106,7 @@ impl Tool for SequentialThinkingTool {
             thought_history_length: response.thought_history_length,
         };
 
-        Ok(ToolResponse::new(narrative, output))
+        Ok(ToolResponse::new(display, output))
     }
 
 }

@@ -14,7 +14,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 // ============================================================================
 // TOOL STRUCT (SESSION MANAGER)
@@ -60,21 +59,13 @@ impl SequentialThinkingTool {
         tool
     }
 
-    /// Generate unique session ID using UUID v4
-    fn generate_session_id(&self) -> String {
-        Uuid::new_v4().to_string()
-    }
-
     /// Get or create a session
     pub async fn get_or_create_session(
         &self,
-        session_id: Option<String>,
+        connection_id: &str,
     ) -> Result<(String, tokio::sync::mpsc::Sender<SessionCommand>), McpError> {
-        // Generate session ID if not provided
-        let session_id = match session_id {
-            Some(id) => id,
-            None => self.generate_session_id(),
-        };
+        // Use connection_id as the session identifier
+        let session_id = connection_id.to_string();
 
         // Check if session exists in memory
         {
