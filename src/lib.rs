@@ -3,6 +3,7 @@
 mod types;
 mod session;
 mod persistence;
+mod string_utils;
 pub mod tool;
 mod trait_impl;
 

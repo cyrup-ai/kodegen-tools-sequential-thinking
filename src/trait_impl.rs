@@ -3,6 +3,7 @@
 //! This module contains the implementation of the Tool trait for SequentialThinkingTool
 //! and the server shutdown hook.
 
+use crate::string_utils::safe_truncate_word_boundary;
 use crate::tool::SequentialThinkingTool;
 use crate::types::SessionCommand;
 use kodegen_mcp_schema::sequential_thinking::{SequentialThinkingArgs, SequentialThinkingOutput, SequentialThinkingPrompts};
@@ -78,17 +79,14 @@ impl Tool for SequentialThinkingTool {
         // Build display: thought only, truncated at 200 chars, light grey
         let display = {
             let thought = &thought_data.thought;
-            let truncated = if thought.len() > 200 {
-                // Find last word/symbol boundary before char 200
-                let truncate_at = thought[..200]
-                    .rfind(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
-                    .unwrap_or(200);
+            let truncated = if thought.chars().count() > 200 {
+                let truncate_at = safe_truncate_word_boundary(thought, 200);
                 format!("{}...", &thought[..truncate_at])
             } else {
                 thought.clone()
             };
-            // Light grey ANSI (same as terminal tool)
-            format!("\x1b[90m{}\x1b[0m", truncated)
+            // LIGHT GREY ANSI 247 (RGB 158,158,158 ≈ #9e9e9e)
+            format!("\x1b[38;5;247m{}\x1b[0m", truncated)
         };
 
         // Build typed output
