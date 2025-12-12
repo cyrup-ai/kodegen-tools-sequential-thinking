@@ -67,7 +67,7 @@ impl Tool for SequentialThinkingTool {
 
         // Get or create session using connection_id and thought_number
         // SequenceManager resolves the correct sequence_id internally
-        let (session_id, tx) = self.get_or_create_session(connection_id, args.thought_number).await?;
+        let (session_id, sequence_id, tx) = self.get_or_create_session(connection_id, args.thought_number).await?;
 
         // Create response channel
         let (respond_to, rx) = tokio::sync::oneshot::channel();
@@ -119,6 +119,7 @@ impl Tool for SequentialThinkingTool {
         // Build typed output
         let output = SequentialThinkingOutput {
             session_id,
+            sequence_id,
             thought_number: response.thought_number,
             total_thoughts: response.total_thoughts,
             thought: thought_data.thought,

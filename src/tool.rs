@@ -108,7 +108,7 @@ impl SequentialThinkingTool {
         &self,
         connection_id: &str,
         thought_number: u32,
-    ) -> Result<(String, tokio::sync::mpsc::Sender<SessionCommand>), McpError> {
+    ) -> Result<(String, u32, tokio::sync::mpsc::Sender<SessionCommand>), McpError> {
         // Resolve sequence_id via SequenceManager
         let (sequence_id, is_new_sequence, previous_sequence) = 
             self.sequence_manager.resolve(connection_id, thought_number);
@@ -139,7 +139,7 @@ impl SequentialThinkingTool {
             if !entry.value().tx.is_closed() {
                 // Update last activity timestamp (lock-free atomic store)
                 entry.value().touch();
-                return Ok((composite_id, entry.value().tx.clone()));
+                return Ok((composite_id, sequence_id as u32, entry.value().tx.clone()));
             }
             // Actor died - remove stale entry and fall through to create new session
             log::debug!("Session {} actor died, removing stale handle", composite_id);
@@ -194,7 +194,7 @@ impl SequentialThinkingTool {
             }
         };
 
-        Ok((composite_id, handle.tx.clone()))
+        Ok((composite_id, sequence_id as u32, handle.tx.clone()))
     }
 
     /// Cleanup a completed sequence for a connection
