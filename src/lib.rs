@@ -4,9 +4,11 @@ mod types;
 mod session;
 mod persistence;
 mod string_utils;
+mod sequence_manager;
 pub mod tool;
 mod trait_impl;
 
+pub use sequence_manager::SequenceManager;
 pub use tool::SequentialThinkingTool;
 pub use types::{SessionStateSnapshot, ThoughtData};
 
@@ -110,7 +112,9 @@ pub async fn start_server_with_listener(
             // Create sequential thinking tool
             let tool = crate::SequentialThinkingTool::new();
 
-            // Wrap in Arc and start cleanup task (required for session management)
+            // Wrap in Arc and start cleanup task
+            // NOTE: SequentialThinkingTool uses Arc<DashMap> internally, so cloning
+            // the tool shares the same sessions map - this is correct behavior.
             let tool_arc = Arc::new(tool.clone());
             tool_arc.clone().start_cleanup_task();
 

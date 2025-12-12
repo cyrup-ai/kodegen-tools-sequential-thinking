@@ -27,14 +27,16 @@ async fn main() -> Result<()> {
             // Create sequential thinking tool
             let tool = SequentialThinkingTool::new();
 
-            // Wrap in Arc and start cleanup task (required for session management)
+            // Wrap in Arc and start cleanup task
+            // NOTE: SequentialThinkingTool uses Arc<DashMap> internally, so cloning
+            // the tool shares the same sessions map - this is correct behavior.
             let tool_arc = Arc::new(tool.clone());
             tool_arc.clone().start_cleanup_task();
 
             // Register shutdown hook to persist active sessions on exit
             managers.register(SequentialThinkingShutdownHook(tool_arc)).await;
 
-            // Register the tool (1 tool)
+            // Register the tool (shares same Arc<DashMap> sessions via clone)
             (tool_router, prompt_router) = register_tool(
                 tool_router,
                 prompt_router,

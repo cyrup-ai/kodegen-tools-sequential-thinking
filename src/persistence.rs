@@ -8,9 +8,7 @@ use crate::types::{
     PersistedSessionFile, PersistenceCommand, PersistenceConfig, SessionCommand, SessionHandle,
     SessionStateSnapshot, ThinkingState,
 };
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
 
 // ============================================================================
 // SECURITY FUNCTIONS
@@ -54,21 +52,23 @@ async fn verify_path_within_base(
             .context("Failed to create sessions base directory")?;
     }
 
-    // Canonicalize base
-    let canonical_base = allowed_base
-        .canonicalize()
+    // Canonicalize base (async - uses spawn_blocking internally)
+    let canonical_base = tokio::fs::canonicalize(allowed_base)
+        .await
         .context("Failed to canonicalize base directory")?;
 
     // Handle non-existent paths by validating parent
     let canonical_path = if tokio::fs::try_exists(constructed_path).await.unwrap_or(false) {
-        constructed_path
-            .canonicalize()
+        tokio::fs::canonicalize(constructed_path)
+            .await
             .context("Failed to canonicalize path")?
     } else {
         // Path doesn't exist - validate parent + append filename
         if let Some(parent) = constructed_path.parent() {
             let canonical_parent = if tokio::fs::try_exists(parent).await.unwrap_or(false) {
-                parent.canonicalize().context("Failed to canonicalize parent")?
+                tokio::fs::canonicalize(parent)
+                    .await
+                    .context("Failed to canonicalize parent")?
             } else {
                 // Parent doesn't exist either - just verify it starts with base
                 if !parent.starts_with(&canonical_base) {
@@ -386,16 +386,23 @@ pub async fn try_restore_session(
     spawn_session_actor_with_state(rx, restored_state);
 
     // Calculate original timestamps from persisted metadata
-    let created_at_elapsed = persisted.created_at.elapsed().ok()?;
-    let created_at = Instant::now()
-        .checked_sub(created_at_elapsed)
-        .unwrap_or_else(Instant::now);
-
-    let handle = SessionHandle {
-        tx: tx.clone(),  // ← Clone tx for verification (needs to be reusable)
-        created_at,
-        last_activity: Arc::new(RwLock::new(Instant::now())),
+    // Handle clock drift gracefully - if persisted time is in future, use now
+    let created_at = match persisted.created_at.elapsed() {
+        Ok(elapsed) => Instant::now()
+            .checked_sub(elapsed)
+            .unwrap_or_else(Instant::now),
+        Err(_) => {
+            // Clock drift detected - persisted time is in future
+            // Use current time as created_at (conservative estimate)
+            log::warn!(
+                "Clock drift detected for session {}: created_at is in future, using current time",
+                session_id
+            );
+            Instant::now()
+        }
     };
+
+    let handle = SessionHandle::with_created_at(tx.clone(), created_at);
 
     // VERIFY ACTOR IS RESPONSIVE before deleting files
     // This prevents data loss if actor fails immediately after spawn
@@ -487,10 +494,28 @@ pub fn start_disk_cleanup_task(
                 };
 
                 // Check if session is older than cleanup threshold
-                let age = session
-                    .last_activity
-                    .elapsed()
-                    .unwrap_or_else(|_| Duration::from_secs(0));
+                // Use file modification time instead of persisted timestamp
+                // This is immune to clock drift since filesystem handles mtime internally
+                let age = match tokio::fs::metadata(&session_file).await {
+                    Ok(meta) => meta
+                        .modified()
+                        .ok()
+                        .and_then(|mtime| mtime.elapsed().ok())
+                        .unwrap_or_else(|| {
+                            log::warn!(
+                                "Clock drift detected for session {}: file mtime is in future",
+                                session.session_id
+                            );
+                            Duration::ZERO
+                        }),
+                    Err(e) => {
+                        log::debug!(
+                            "Failed to read metadata for session {}: {e}",
+                            session.session_id
+                        );
+                        continue;
+                    }
+                };
 
                 if age > config.cleanup_after {
                     // Use try_send for non-critical disk cleanup

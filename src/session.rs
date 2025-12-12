@@ -31,37 +31,60 @@ pub fn spawn_session_actor_with_state(
                     thought,
                     respond_to,
                 } => {
-                    // Update state (lock-free - we own it!)
-                    state.thought_history.push(thought.clone());
+                    // NOTE: New thought chains are handled by SequenceManager in tool.rs
+                    // When thought_number == 1, a new session actor is spawned with fresh state.
+                    // No need to clear state here - this actor only sees one thought chain.
 
-                    // Add to branch if applicable
-                    if let (Some(_), Some(branch_id)) =
-                        (thought.branch_from_thought, &thought.branch_id)
-                    {
-                        state
-                            .branches
-                            .entry(branch_id.clone())
-                            .or_default()
-                            .push(thought.clone());
+                    // ================================================================
+                    // STEP 1: Clone for branching ONLY if needed (before any moves)
+                    // ================================================================
+                    let branch_clone = match (&thought.branch_from_thought, &thought.branch_id) {
+                        (Some(_), Some(branch_id)) => Some((branch_id.clone(), thought.clone())),
+                        _ => None,
+                    };
+
+                    // ================================================================
+                    // STEP 2: Extract Copy fields for response BEFORE moving thought
+                    // ================================================================
+                    let thought_number = thought.thought_number;
+                    let total_thoughts = thought.total_thoughts;
+                    let next_thought_needed = thought.next_thought_needed;
+
+                    // ================================================================
+                    // STEP 3: Move thought into history (ZERO-COPY for non-branching)
+                    // ================================================================
+                    state.thought_history.push(thought);
+
+                    // ================================================================
+                    // STEP 4: Insert pre-cloned thought into branches if applicable
+                    // ================================================================
+                    if let Some((branch_id, thought_clone)) = branch_clone {
+                        state.branches.entry(branch_id).or_default().push(thought_clone);
                     }
 
-                    // Build response
+                    // ================================================================
+                    // STEP 5: Build response using extracted Copy fields
+                    // ================================================================
                     let response = SessionResponse {
-                        thought_number: thought.thought_number,
-                        total_thoughts: thought.total_thoughts,
-                        next_thought_needed: thought.next_thought_needed,
+                        thought_number,
+                        total_thoughts,
+                        next_thought_needed,
                         branches: state.branches.keys().cloned().collect(),
                         thought_history_length: state.thought_history.len(),
                     };
 
-                    // Send response (ignore if receiver dropped)
+                    // ================================================================
+                    // STEP 6: Send response
+                    // ================================================================
                     let _ = respond_to.send(response);
 
-                    // Terminate session if thinking is complete
-                    if !thought.next_thought_needed {
+                    // ================================================================
+                    // STEP 7: Check termination using extracted flag
+                    // ================================================================
+                    if !next_thought_needed {
                         log::debug!(
-                            "Session completed (final thought {}), terminating actor",
-                            thought.thought_number
+                            "Thought {} marked as final, terminating session actor",
+                            thought_number
                         );
                         break;
                     }

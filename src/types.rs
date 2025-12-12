@@ -7,9 +7,8 @@ use kodegen_config::KodegenConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
 
 // ============================================================================
 // INTERNAL STATE
@@ -201,12 +200,60 @@ impl PersistedSessionFile {
 // ============================================================================
 
 /// Handle to a running session actor
-#[derive(Clone)]
+///
+/// Uses AtomicU64 for last_activity to enable lock-free timestamp updates.
+/// The value stores milliseconds elapsed since `created_at`.
 pub struct SessionHandle {
     /// Channel to send commands to the session's actor task
     pub tx: tokio::sync::mpsc::Sender<SessionCommand>,
-    /// When this session was created (for potential future runtime reporting)
+    /// When this session was created (anchor for last_activity calculation)
     pub created_at: Instant,
-    /// Last time a command was processed (used for cleanup)
-    pub last_activity: Arc<RwLock<Instant>>,
+    /// Last activity as milliseconds since created_at (for lock-free atomic updates)
+    /// Value of 0 means "same as created_at"
+    last_activity_ms: AtomicU64,
+}
+
+impl Clone for SessionHandle {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            created_at: self.created_at,
+            // Clone the current atomic value
+            last_activity_ms: AtomicU64::new(self.last_activity_ms.load(Ordering::Relaxed)),
+        }
+    }
+}
+
+impl SessionHandle {
+    /// Create a new SessionHandle with current time as created_at and last_activity
+    pub fn new(tx: tokio::sync::mpsc::Sender<SessionCommand>) -> Self {
+        Self {
+            tx,
+            created_at: Instant::now(),
+            last_activity_ms: AtomicU64::new(0), // 0 = same as created_at
+        }
+    }
+
+    /// Create a SessionHandle with a specific created_at time (for restoration)
+    pub fn with_created_at(tx: tokio::sync::mpsc::Sender<SessionCommand>, created_at: Instant) -> Self {
+        Self {
+            tx,
+            created_at,
+            last_activity_ms: AtomicU64::new(0),
+        }
+    }
+
+    /// Update last activity timestamp to now (lock-free atomic store)
+    #[inline]
+    pub fn touch(&self) {
+        let elapsed_ms = self.created_at.elapsed().as_millis() as u64;
+        self.last_activity_ms.store(elapsed_ms, Ordering::Relaxed);
+    }
+
+    /// Get the last activity time as an Instant
+    #[inline]
+    pub fn last_activity(&self) -> Instant {
+        let elapsed_ms = self.last_activity_ms.load(Ordering::Relaxed);
+        self.created_at + Duration::from_millis(elapsed_ms)
+    }
 }

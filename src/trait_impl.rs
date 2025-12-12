@@ -65,8 +65,9 @@ impl Tool for SequentialThinkingTool {
         // Get connection_id from context (same pattern as terminal tool)
         let connection_id = ctx.connection_id().unwrap_or("default");
 
-        // Get or create session using connection_id
-        let (session_id, tx) = self.get_or_create_session(connection_id).await?;
+        // Get or create session using connection_id and thought_number
+        // SequenceManager resolves the correct sequence_id internally
+        let (session_id, tx) = self.get_or_create_session(connection_id, args.thought_number).await?;
 
         // Create response channel
         let (respond_to, rx) = tokio::sync::oneshot::channel();
@@ -129,6 +130,11 @@ impl Tool for SequentialThinkingTool {
             branches: response.branches,
             thought_history_length: response.thought_history_length,
         };
+
+        // Cleanup sequence when thought chain completes
+        if !response.next_thought_needed {
+            self.cleanup_sequence(connection_id);
+        }
 
         Ok(ToolResponse::new(display, output))
     }
