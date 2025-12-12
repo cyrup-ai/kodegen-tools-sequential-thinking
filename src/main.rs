@@ -5,22 +5,15 @@
 
 use anyhow::Result;
 use kodegen_config::CATEGORY_SEQUENTIAL_THINKING;
-use kodegen_server_http::{ServerBuilder, Managers, RouterSet, ShutdownHook, register_tool};
+use kodegen_server_http::{ServerBuilder, Managers, RouterSet, register_tool};
 use rmcp::handler::server::router::{prompt::PromptRouter, tool::ToolRouter};
 use std::sync::Arc;
 
-// Wrapper to impl ShutdownHook for Arc<SequentialThinkingTool>
-struct SequentialThinkingWrapper(Arc<kodegen_tools_sequential_thinking::SequentialThinkingTool>);
-
-impl ShutdownHook for SequentialThinkingWrapper {
-    fn shutdown(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + '_>> {
-        let tool = self.0.clone();
-        Box::pin(async move {
-            tool.shutdown().await
-                .map_err(|e| anyhow::anyhow!("Failed to shutdown sequential thinking tool: {e}"))
-        })
-    }
-}
+// Import the reusable shutdown hook from lib
+use kodegen_tools_sequential_thinking::{
+    SequentialThinkingTool,
+    SequentialThinkingShutdownHook,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,14 +25,14 @@ async fn main() -> Result<()> {
             let managers = Managers::new();
 
             // Create sequential thinking tool
-            let tool = kodegen_tools_sequential_thinking::SequentialThinkingTool::new();
+            let tool = SequentialThinkingTool::new();
 
             // Wrap in Arc and start cleanup task (required for session management)
             let tool_arc = Arc::new(tool.clone());
             tool_arc.clone().start_cleanup_task();
 
             // Register shutdown hook to persist active sessions on exit
-            managers.register(SequentialThinkingWrapper(tool_arc)).await;
+            managers.register(SequentialThinkingShutdownHook(tool_arc)).await;
 
             // Register the tool (1 tool)
             (tool_router, prompt_router) = register_tool(

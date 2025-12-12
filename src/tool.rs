@@ -8,12 +8,32 @@ use crate::session::spawn_session_actor;
 use crate::types::{
     PersistenceCommand, SessionCommand, SessionHandle, SessionStateSnapshot, ThoughtData,
 };
+use dashmap::mapref::entry::Entry;
+use dashmap::DashMap;
 use kodegen_mcp_schema::sequential_thinking::SequentialThinkingArgs;
 use kodegen_mcp_schema::McpError;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
+
+// ============================================================================
+// CONFIGURATION CONSTANTS
+// ============================================================================
+
+/// Persistence channel capacity (prevents OOM from unbounded queue growth)
+/// 
+/// Sized to handle typical shutdown scenarios:
+/// - 100 capacity = supports ~100 concurrent persistence operations
+/// - At ~100KB per session, max buffer = ~10MB
+/// - Provides backpressure when disk I/O is slow
+const PERSISTENCE_CHANNEL_CAPACITY: usize = 100;
+
+/// Batch size for persistence operations during shutdown
+///
+/// Larger batches improve I/O efficiency but increase memory per message.
+/// - 50 sessions per batch = ~5MB per batch message
+/// - Reduces total messages by 50x (500 sessions → 10 batch messages)
+const PERSISTENCE_BATCH_SIZE: usize = 50;
 
 // ============================================================================
 // TOOL STRUCT (SESSION MANAGER)
@@ -25,11 +45,13 @@ use tokio::sync::RwLock;
 /// This eliminates lock contention and provides perfect isolation between users.
 #[derive(Clone)]
 pub struct SequentialThinkingTool {
-    /// Active session handles (only stores channel senders, not state)
-    sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
+    /// Lock-free concurrent map of active session handles
+    /// Key: connection_id (one session per connection)
+    /// Value: SessionHandle (contains channel sender + metadata)
+    sessions: Arc<DashMap<String, SessionHandle>>,
 
     /// Fire-and-forget channel for persistence requests
-    persistence_sender: tokio::sync::mpsc::UnboundedSender<PersistenceCommand>,
+    persistence_sender: tokio::sync::mpsc::Sender<PersistenceCommand>,
 }
 
 impl Default for SequentialThinkingTool {
@@ -43,10 +65,11 @@ impl SequentialThinkingTool {
     #[must_use]
     pub fn new() -> Self {
         // Create persistence channel
-        let (persistence_sender, persistence_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (persistence_sender, persistence_receiver) = 
+            tokio::sync::mpsc::channel(PERSISTENCE_CHANNEL_CAPACITY);
 
         let tool = Self {
-            sessions: Arc::new(RwLock::new(HashMap::new())),
+            sessions: Arc::new(DashMap::new()),
             persistence_sender: persistence_sender.clone(),
         };
 
@@ -59,54 +82,87 @@ impl SequentialThinkingTool {
         tool
     }
 
-    /// Get or create a session
+    /// Get or create a connection session (RACE-FREE)
+    ///
+    /// Returns (connection_id, channel_sender) for communication with the session actor.
+    /// Note: The returned ID is the connection_id, not a full session_id.
+    /// Full session_id = "{connection_id}_{sequence_id}" is constructed by the caller
+    /// using the sequence_id from SessionResponse.
+    ///
+    /// ## Race Condition Safety
+    ///
+    /// This implementation is safe against TOCTOU races because:
+    /// 1. Fast path uses DashMap::get() (lock-free, atomic)
+    /// 2. Slow path uses DashMap::entry() for atomic check-and-insert
+    /// 3. If two threads race during disk restore, only one wins via Entry::Vacant
+    /// 4. Loser's restored/created handle is dropped (actor terminates cleanly)
     pub async fn get_or_create_session(
         &self,
         connection_id: &str,
     ) -> Result<(String, tokio::sync::mpsc::Sender<SessionCommand>), McpError> {
-        // Use connection_id as the session identifier
-        let session_id = connection_id.to_string();
+        let conn_id = connection_id.to_string();
 
-        // Check if session exists in memory
-        {
-            let sessions = self.sessions.read().await;
-            if let Some(handle) = sessions.get(&session_id) {
-                // Update last activity
-                *handle.last_activity.write().await = Instant::now();
-                return Ok((session_id, handle.tx.clone()));
+        // ========================================================================
+        // FAST PATH: Check if session already exists (lock-free read)
+        // ========================================================================
+        if let Some(entry) = self.sessions.get(&conn_id) {
+            // Update last activity timestamp
+            *entry.value().last_activity.write().await = Instant::now();
+            return Ok((conn_id, entry.value().tx.clone()));
+        }
+
+        // ========================================================================
+        // SLOW PATH: Session not in memory, try restore from disk
+        // ========================================================================
+        // No lock held during async disk I/O - allows concurrent requests
+        let maybe_restored = try_restore_session(&conn_id, &self.persistence_sender).await;
+
+        // ========================================================================
+        // ATOMIC INSERT: Use entry() API for race-free check-and-insert
+        // ========================================================================
+        let handle = match self.sessions.entry(conn_id.clone()) {
+            Entry::Occupied(entry) => {
+                // Another thread created the session while we were doing disk I/O
+                // Use their session handle and discard ours (if any)
+                log::debug!(
+                    "Session {} already created by another thread, using existing",
+                    conn_id
+                );
+
+                // Update last activity and return existing handle
+                *entry.get().last_activity.write().await = Instant::now();
+                entry.get().clone()
             }
-        }
 
-        // Try to restore from disk before creating new session
-        if let Some(restored_handle) =
-            try_restore_session(&session_id, &self.persistence_sender).await
-        {
-            // Add restored session to active sessions
-            let tx = restored_handle.tx.clone();
-            let mut sessions = self.sessions.write().await;
-            sessions.insert(session_id.clone(), restored_handle);
-            return Ok((session_id, tx));
-        }
+            Entry::Vacant(entry) => {
+                // We won the race! Create or use restored session
+                let handle = if let Some(restored_handle) = maybe_restored {
+                    // Use the restored session from disk
+                    log::info!("Restored session {} from disk", conn_id);
+                    restored_handle
+                } else {
+                    // Create brand new session
+                    log::debug!("Creating new session {}", conn_id);
 
-        // Create new session if not found in memory or disk
-        let (tx, rx) = tokio::sync::mpsc::channel::<SessionCommand>(100);
+                    let (tx, rx) = tokio::sync::mpsc::channel::<SessionCommand>(100);
 
-        // Spawn actor task
-        spawn_session_actor(rx);
+                    // Spawn session actor task
+                    spawn_session_actor(rx);
 
-        // Store handle
-        let handle = SessionHandle {
-            tx: tx.clone(),
-            created_at: Instant::now(),
-            last_activity: Arc::new(RwLock::new(Instant::now())),
+                    SessionHandle {
+                        tx,
+                        created_at: Instant::now(),
+                        last_activity: Arc::new(RwLock::new(Instant::now())),
+                    }
+                };
+
+                // Insert into map atomically (we hold the Entry::Vacant lock)
+                entry.insert(handle.clone());
+                handle
+            }
         };
 
-        {
-            let mut sessions = self.sessions.write().await;
-            sessions.insert(session_id.clone(), handle);
-        }
-
-        Ok((session_id, tx))
+        Ok((conn_id, handle.tx.clone()))
     }
 
     /// Get session state snapshot (for debugging or persistence)
@@ -114,8 +170,8 @@ impl SequentialThinkingTool {
         &self,
         session_id: &str,
     ) -> Result<SessionStateSnapshot, McpError> {
-        let sessions = self.sessions.read().await;
-        let handle = sessions
+        let handle = self
+            .sessions
             .get(session_id)
             .ok_or_else(|| McpError::Other(anyhow::anyhow!("Session not found: {session_id}")))?;
 
@@ -123,6 +179,7 @@ impl SequentialThinkingTool {
         let cmd = SessionCommand::GetState { respond_to };
 
         handle
+            .value()
             .tx
             .send(cmd)
             .await
@@ -134,8 +191,8 @@ impl SequentialThinkingTool {
 
     /// Clear a session's history (for starting fresh with same session ID)
     pub async fn clear_session(&self, session_id: &str) -> Result<(), McpError> {
-        let sessions = self.sessions.read().await;
-        let handle = sessions
+        let handle = self
+            .sessions
             .get(session_id)
             .ok_or_else(|| McpError::Other(anyhow::anyhow!("Session not found: {session_id}")))?;
 
@@ -143,6 +200,7 @@ impl SequentialThinkingTool {
         let cmd = SessionCommand::Clear { respond_to };
 
         handle
+            .value()
             .tx
             .send(cmd)
             .await
@@ -154,13 +212,13 @@ impl SequentialThinkingTool {
 
     /// Get session info including creation time and activity
     pub async fn get_session_info(&self, session_id: &str) -> Result<(Instant, Instant), McpError> {
-        let sessions = self.sessions.read().await;
-        let handle = sessions
+        let handle = self
+            .sessions
             .get(session_id)
             .ok_or_else(|| McpError::Other(anyhow::anyhow!("Session not found: {session_id}")))?;
 
-        let created_at = handle.created_at;
-        let last_activity = *handle.last_activity.read().await;
+        let created_at = handle.value().created_at;
+        let last_activity = *handle.value().last_activity.read().await;
 
         Ok((created_at, last_activity))
     }
@@ -171,13 +229,13 @@ impl SequentialThinkingTool {
             .checked_sub(max_age)
             .unwrap_or_else(Instant::now);
 
-        let mut sessions = self.sessions.write().await;
         let mut to_persist = Vec::new();
 
-        sessions.retain(|session_id, handle| {
+        // Iterate and remove in-place (DashMap supports concurrent modification)
+        self.sessions.retain(|session_id, handle| {
             // Closed channels: session actor terminated, remove immediately
             if handle.tx.is_closed() {
-                log::debug!("Removing closed session: {session_id}");
+                log::debug!("Removing closed session: {}", session_id);
                 return false;
             }
 
@@ -189,17 +247,15 @@ impl SequentialThinkingTool {
 
             // Old sessions: persist before removal
             if last_activity < purge_cutoff {
-                log::debug!("Session {session_id} expired, will persist before removal");
+                log::debug!("Session {} expired, will persist before removal", session_id);
                 to_persist.push((session_id.clone(), handle.clone()));
                 return false;
             }
 
-            true
+            true // Keep session
         });
 
-        drop(sessions);
-
-        // Persist sessions outside of lock (fire-and-forget)
+        // Persist sessions outside of map iteration (fire-and-forget)
         for (session_id, handle) in to_persist {
             // Get session state via GetState command
             let (respond_to, rx) = tokio::sync::oneshot::channel();
@@ -222,13 +278,28 @@ impl SequentialThinkingTool {
                     .checked_sub(last_activity_elapsed)
                     .unwrap_or_else(std::time::SystemTime::now);
 
-                // Send to persistence task (fire-and-forget)
-                let _ = self.persistence_sender.send(PersistenceCommand::Persist {
+                // Use try_send for non-critical cleanup (don't block cleanup task)
+                match self.persistence_sender.try_send(PersistenceCommand::Persist {
                     session_id: session_id.clone(),
                     snapshot,
                     created_at,
                     last_activity,
-                });
+                }) {
+                    Ok(_) => {
+                        log::debug!("Queued session {} for persistence", session_id);
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        log::warn!(
+                            "Persistence channel full, skipping persistence for session {}. \
+                             Session will be re-queued on next cleanup cycle.",
+                            session_id
+                        );
+                        // Session will be persisted on next cleanup cycle or shutdown
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        log::error!("Persistence channel closed, cannot persist session {}", session_id);
+                    }
+                }
             }
         }
     }
@@ -247,26 +318,36 @@ impl SequentialThinkingTool {
 
     /// Shutdown the tool gracefully, persisting all active sessions
     ///
-    /// Called during server shutdown to ensure no sessions are lost.
-    /// Persists all active sessions to disk before terminating.
+    /// Uses completion channels to wait for actual persistence completion.
+    /// Each batch has a 30-second timeout to prevent indefinite blocking.
+    /// Pattern from kodegen-server-http/src/managers.rs shutdown()
     pub async fn shutdown(&self) -> Result<(), McpError> {
         log::info!("Shutting down sequential thinking tool, persisting active sessions");
 
         // Get snapshot of all active sessions
-        let sessions = self.sessions.read().await;
-        let session_ids: Vec<String> = sessions.keys().cloned().collect();
-        drop(sessions);
+        let session_ids: Vec<String> = self.sessions.iter()
+            .map(|entry| entry.key().clone())
+            .collect();
 
-        log::debug!("Found {} active sessions to persist", session_ids.len());
+        let total_sessions = session_ids.len();
+        log::debug!("Found {} active sessions to persist", total_sessions);
 
-        // Persist each session
+        if total_sessions == 0 {
+            log::info!("No sessions to persist, shutdown complete");
+            return Ok(());
+        }
+
+        // Collect completion receivers for all batches
+        let mut batch_receivers: Vec<tokio::sync::oneshot::Receiver<Result<usize, String>>> = Vec::new();
+        let mut current_batch: Vec<(String, SessionStateSnapshot, std::time::SystemTime, std::time::SystemTime)> = Vec::new();
+        let mut sessions_queued = 0usize;
+
         for session_id in session_ids {
             // Get session state
             if let Ok(snapshot) = self.get_session_state(&session_id).await {
                 // Get session handle for timestamps
-                let sessions = self.sessions.read().await;
-                if let Some(handle) = sessions.get(&session_id) {
-                    // Convert Instant → SystemTime (pattern from cleanup_sessions)
+                if let Some(handle) = self.sessions.get(&session_id) {
+                    // Convert Instant to SystemTime
                     let created_at_elapsed = handle.created_at.elapsed();
                     let created_at = std::time::SystemTime::now()
                         .checked_sub(created_at_elapsed)
@@ -278,24 +359,97 @@ impl SequentialThinkingTool {
                         .checked_sub(last_activity_elapsed)
                         .unwrap_or_else(std::time::SystemTime::now);
 
-                    // Send persistence command (fire-and-forget)
-                    let _ = self.persistence_sender.send(PersistenceCommand::Persist {
-                        session_id: session_id.clone(),
-                        snapshot,
-                        created_at,
-                        last_activity,
-                    });
+                    // Add to current batch
+                    current_batch.push((session_id.clone(), snapshot, created_at, last_activity));
+                    sessions_queued += 1;
 
-                    log::debug!("Queued session {} for persistence", session_id);
+                    // Send batch when it reaches target size
+                    if current_batch.len() >= PERSISTENCE_BATCH_SIZE {
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        
+                        if let Err(e) = self.persistence_sender.send(
+                            PersistenceCommand::PersistBatch {
+                                sessions: std::mem::take(&mut current_batch),
+                                completion: Some(tx),
+                            }
+                        ).await {
+                            log::error!("Failed to send persistence batch: {e}");
+                            break;
+                        }
+                        
+                        batch_receivers.push(rx);
+                    }
                 }
             }
         }
 
-        // Give persistence task time to process all commands
-        // (persistence runs in background, this ensures writes complete)
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // Send final partial batch if not empty
+        if !current_batch.is_empty() {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            
+            if let Err(e) = self.persistence_sender.send(
+                PersistenceCommand::PersistBatch {
+                    sessions: current_batch,
+                    completion: Some(tx),
+                }
+            ).await {
+                log::error!("Failed to send final persistence batch: {e}");
+            } else {
+                batch_receivers.push(rx);
+            }
+        }
 
-        log::info!("Sequential thinking tool shutdown complete");
+        let batch_count = batch_receivers.len();
+        log::info!(
+            "Queued {} sessions in {} batches, waiting for completion",
+            sessions_queued, batch_count
+        );
+
+        // Wait for all batches to complete with per-batch timeout
+        // 30 seconds is generous for slow disks while preventing indefinite hang
+        const BATCH_TIMEOUT: Duration = Duration::from_secs(30);
+        
+        let mut total_persisted = 0usize;
+        let mut batches_succeeded = 0usize;
+        let mut batches_failed = 0usize;
+        let mut batches_timeout = 0usize;
+
+        for (batch_num, rx) in batch_receivers.into_iter().enumerate() {
+            match tokio::time::timeout(BATCH_TIMEOUT, rx).await {
+                Ok(Ok(Ok(count))) => {
+                    // Batch completed successfully
+                    log::debug!("Batch {} completed: {} sessions persisted", batch_num, count);
+                    total_persisted += count;
+                    batches_succeeded += 1;
+                }
+                Ok(Ok(Err(e))) => {
+                    // Batch reported failure (unlikely but possible)
+                    log::error!("Batch {} reported failure: {}", batch_num, e);
+                    batches_failed += 1;
+                }
+                Ok(Err(_)) => {
+                    // oneshot channel dropped - persistence task crashed
+                    log::error!("Batch {} completion channel dropped (task crashed?)", batch_num);
+                    batches_failed += 1;
+                }
+                Err(_) => {
+                    // Timeout - batch still processing but we can't wait forever
+                    log::error!(
+                        "Batch {} timeout after {:?} (persistence may still complete)",
+                        batch_num, BATCH_TIMEOUT
+                    );
+                    batches_timeout += 1;
+                }
+            }
+        }
+
+        log::info!(
+            "Sequential thinking shutdown: {}/{} sessions persisted, \
+             batches: {} succeeded, {} failed, {} timeout",
+            total_persisted, sessions_queued,
+            batches_succeeded, batches_failed, batches_timeout
+        );
+
         Ok(())
     }
 

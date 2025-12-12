@@ -11,6 +11,16 @@ use kodegen_mcp_schema::McpError;
 use kodegen_mcp_schema::{Tool, ToolExecutionContext, ToolResponse};
 
 // ============================================================================
+// TIMEOUT CONFIGURATION
+// ============================================================================
+
+/// Timeout for session actor to respond to commands (30s for generous safety margin)
+const ACTOR_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Timeout for sending commands to session actor (5s, should be instant)
+const ACTOR_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+// ============================================================================
 // TOOL IMPLEMENTATION
 // ============================================================================
 
@@ -67,14 +77,30 @@ impl Tool for SequentialThinkingTool {
             respond_to,
         };
 
-        tx.send(cmd)
+        // Send command with timeout protection
+        tokio::time::timeout(ACTOR_SEND_TIMEOUT, tx.send(cmd))
             .await
-            .map_err(|_| McpError::Other(anyhow::anyhow!("Session actor terminated")))?;
+            .map_err(|_| McpError::Other(anyhow::anyhow!(
+                "Timeout sending command to session actor ({}s). \
+                 This indicates MPSC channel backpressure or actor deadlock.",
+                ACTOR_SEND_TIMEOUT.as_secs()
+            )))?
+            .map_err(|_| McpError::Other(anyhow::anyhow!(
+                "Session actor terminated (channel closed)"
+            )))?;
 
-        // Wait for response
-        let response = rx
+        // Wait for response with timeout protection
+        let response = tokio::time::timeout(ACTOR_RESPONSE_TIMEOUT, rx)
             .await
-            .map_err(|_| McpError::Other(anyhow::anyhow!("Session actor failed to respond")))?;
+            .map_err(|_| McpError::Other(anyhow::anyhow!(
+                "Session actor response timeout after {}s. \
+                 Actor may be hung in infinite loop, deadlocked, or system is experiencing \
+                 severe resource exhaustion. This is a critical error requiring investigation.",
+                ACTOR_RESPONSE_TIMEOUT.as_secs()
+            )))?
+            .map_err(|_| McpError::Other(anyhow::anyhow!(
+                "Session actor failed to respond (sender dropped, likely panic)"
+            )))?;
 
         // Build display: thought only, truncated at 200 chars, light grey
         let display = {

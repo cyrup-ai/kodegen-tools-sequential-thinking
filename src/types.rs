@@ -117,7 +117,7 @@ impl PersistenceConfig {
 
 /// Commands for persistence background task
 pub enum PersistenceCommand {
-    /// Persist a session to disk
+    /// Persist a single session to disk
     Persist {
         session_id: String,
         snapshot: SessionStateSnapshot,
@@ -125,25 +125,75 @@ pub enum PersistenceCommand {
         last_activity: std::time::SystemTime,
     },
 
+    /// Persist multiple sessions in a single batch (more efficient)
+    PersistBatch {
+        sessions: Vec<(String, SessionStateSnapshot, std::time::SystemTime, std::time::SystemTime)>,
+        /// Completion channel for shutdown synchronization
+        /// Sends Ok(success_count) on completion, or Err(message) on critical failure
+        completion: Option<tokio::sync::oneshot::Sender<Result<usize, String>>>,
+    },
+
     /// Delete a session from disk
     Delete { session_id: String },
 }
 
-/// Session metadata file (persisted as session.json)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SessionMetadataFile {
+// ============================================================================
+// UNIFIED PERSISTENCE FORMAT
+// ============================================================================
+
+/// Complete session state persisted to a single JSON file
+///
+/// Replaces the multi-file structure (session.json + thought{n}.json + branch_*.json)
+/// with a single atomic file that contains all session data.
+///
+/// Persisted to: `{sessions_dir}/{session_id}/session.json`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedSessionFile {
+    /// Session metadata (previously in session.json)
     pub session_id: String,
     pub created_at: std::time::SystemTime,
     pub last_activity: std::time::SystemTime,
-    pub total_thoughts: usize,
-    pub branch_ids: Vec<String>,
+
+    /// Main thought sequence (previously in thought{n}.json files)
+    pub thought_history: Vec<ThoughtData>,
+
+    /// Branched thought sequences (previously in branch_{id}_thought{n}.json files)
+    pub branches: HashMap<String, Vec<ThoughtData>>,
+
+    /// File format version for future compatibility
+    #[serde(default = "default_version")]
+    pub version: u32,
 }
 
-/// Individual thought file (persisted as thought{n}.json)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PersistedThought {
-    pub thought_number: u32,
-    pub thought_data: ThoughtData,
+fn default_version() -> u32 {
+    1
+}
+
+impl PersistedSessionFile {
+    /// Create from snapshot and metadata
+    pub fn from_snapshot(
+        session_id: String,
+        snapshot: &SessionStateSnapshot,
+        created_at: std::time::SystemTime,
+        last_activity: std::time::SystemTime,
+    ) -> Self {
+        Self {
+            session_id,
+            created_at,
+            last_activity,
+            thought_history: snapshot.thought_history.clone(),
+            branches: snapshot.branches.clone(),
+            version: 1,
+        }
+    }
+
+    /// Convert to snapshot for restoration
+    pub fn to_snapshot(&self) -> SessionStateSnapshot {
+        SessionStateSnapshot {
+            thought_history: self.thought_history.clone(),
+            branches: self.branches.clone(),
+        }
+    }
 }
 
 // ============================================================================

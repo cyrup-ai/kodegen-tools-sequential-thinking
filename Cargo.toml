@@ -1,6 +1,6 @@
 [package]
 name = "kodegen_tools_sequential_thinking"
-version = "0.10.5"
+version = "0.10.6"
 edition = "2024"
 description = "KODEGEN.ᴀɪ: Memory-efficient, Blazing-Fast, MCP tools for code generation agents."
 authors = ["KODEGEN.ᴀɪ"]
@@ -63,6 +63,9 @@ rustls = "0.23"
 # Synchronization primitives - for Arc<RwLock<ThinkingState>>
 parking_lot = "0.12"
 
+# Lock-free concurrent map - for session management
+dashmap = "6"
+
 # Terminal colors - for formatted stderr output
 cyrup_termcolor = "2"
 
@@ -79,6 +82,7 @@ http = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
+const_format = "0.2"
 
 [lib]
 name = "kodegen_tools_sequential_thinking"

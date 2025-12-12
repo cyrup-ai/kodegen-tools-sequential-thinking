@@ -15,10 +15,33 @@ use std::sync::Arc;
 use std::pin::Pin;
 use std::future::Future;
 
-// Wrapper to implement ShutdownHook for session persistence
-struct SequentialThinkingWrapper(Arc<crate::SequentialThinkingTool>);
+/// Shutdown hook wrapper for Arc<SequentialThinkingTool>
+///
+/// This newtype wrapper implements the ShutdownHook trait for Arc<SequentialThinkingTool>.
+/// It's necessary because:
+/// - `start_cleanup_task()` requires `Arc<Self>` for background task spawning
+/// - `ShutdownHook` is implemented on `SequentialThinkingTool`, not `Arc<SequentialThinkingTool>`
+/// - Rust doesn't forward trait impls through Arc automatically
+/// - Orphan rules prevent implementing ShutdownHook directly on Arc<T>
+///
+/// # Usage
+/// ```no_run
+/// use std::sync::Arc;
+/// use kodegen_tools_sequential_thinking::{SequentialThinkingTool, SequentialThinkingShutdownHook};
+/// use kodegen_server_http::Managers;
+///
+/// # async fn example() {
+/// let tool = SequentialThinkingTool::new();
+/// let tool_arc = Arc::new(tool);
+/// tool_arc.clone().start_cleanup_task();
+///
+/// let managers = Managers::new();
+/// managers.register(SequentialThinkingShutdownHook(tool_arc)).await;
+/// # }
+/// ```
+pub struct SequentialThinkingShutdownHook(pub Arc<SequentialThinkingTool>);
 
-impl kodegen_server_http::ShutdownHook for SequentialThinkingWrapper {
+impl kodegen_server_http::ShutdownHook for SequentialThinkingShutdownHook {
     fn shutdown(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         let tool = self.0.clone();
         Box::pin(async move {
@@ -92,7 +115,7 @@ pub async fn start_server_with_listener(
             tool_arc.clone().start_cleanup_task();
 
             // Register shutdown hook to persist active sessions on exit
-            managers.register(SequentialThinkingWrapper(tool_arc)).await;
+            managers.register(SequentialThinkingShutdownHook(tool_arc)).await;
 
             // Register the tool (1 tool)
             (tool_router, prompt_router) = register_tool(
